@@ -1042,20 +1042,58 @@ function handleControlMessage(peerId, msg) {
                 totalChunks: Math.ceil(msg.fileSize / CHUNK_SIZE),
                 bytesTransferred: 0,
                 startTime: 0,
-                isCancelled: false
+                isCancelled: false,
+                queueIndex: msg.queueIndex !== undefined ? msg.queueIndex : 0,
+                queueLength: msg.queueLength !== undefined ? msg.queueLength : 1
             };
             
-            // Show prompt
-            el.reqSenderName.textContent = senderName;
-            el.reqSenderAvatar.style.background = peer ? peer.color : 'var(--primary-gradient)';
-            el.reqFileName.textContent = msg.fileName;
-            el.reqFileSize.textContent = formatBytes(msg.fileSize);
+            // Check if we should auto-accept this queued file transfer
+            const shouldAutoAccept = (
+                autoAcceptPeerId === peerId &&
+                msg.queueIndex > 0
+            );
             
-            // Set type icon
-            el.reqFileIcon.innerHTML = getFileIconHTML(msg.fileType);
-            
-            AudioFeedback.playRequest();
-            showModal(el.receiveRequestModal);
+            if (shouldAutoAccept) {
+                // Auto-accept: send accept signal and start receiving UI state immediately
+                activeTransfer.startTime = Date.now();
+                
+                // Show progress modal
+                el.progressTitle.textContent = `Receiving file (${msg.queueIndex + 1}/${msg.queueLength})...`;
+                el.progressFileInfo.textContent = `${msg.fileName} (${formatBytes(msg.fileSize)})`;
+                el.transferMode.textContent = 'WebRTC P2P Direct';
+                el.transferMode.style.background = 'rgba(16, 185, 129, 0.15)';
+                el.transferMode.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                el.transferMode.style.color = 'var(--success-color)';
+                updateProgressUI(0);
+                showModal(el.progressModal);
+                
+                // Send accept message back over data channel
+                const dc = dataChannels.get(peerId);
+                if (dc && dc.readyState === 'open') {
+                    dc.send(JSON.stringify({ type: 'file-accept', accepted: true }));
+                }
+                
+                resetAutoAcceptTimeout();
+            } else {
+                // Reset trust session if a new queue/single file is sent manually
+                if (msg.queueIndex === 0 || msg.queueIndex === undefined) {
+                    autoAcceptPeerId = null;
+                }
+                
+                // Show prompt
+                el.reqSenderName.textContent = senderName;
+                el.reqSenderAvatar.style.background = peer ? peer.color : 'var(--primary-gradient)';
+                el.reqFileName.textContent = msg.queueLength > 1 
+                    ? `${msg.fileName} (and ${msg.queueLength - 1} more files)`
+                    : msg.fileName;
+                el.reqFileSize.textContent = formatBytes(msg.fileSize);
+                
+                // Set type icon
+                el.reqFileIcon.innerHTML = getFileIconHTML(msg.fileType);
+                
+                AudioFeedback.playRequest();
+                showModal(el.receiveRequestModal);
+            }
             break;
             
         case 'file-accept':
@@ -1213,18 +1251,54 @@ function handleRelayFileMetadata(senderId, msg) {
         totalChunks: Math.ceil(msg.fileSize / CHUNK_SIZE),
         bytesTransferred: 0,
         startTime: 0,
-        isCancelled: false
+        isCancelled: false,
+        queueIndex: msg.queueIndex !== undefined ? msg.queueIndex : 0,
+        queueLength: msg.queueLength !== undefined ? msg.queueLength : 1
     };
     
-    // Set interface prompt options
-    el.reqSenderName.textContent = senderName;
-    el.reqSenderAvatar.style.background = peer ? peer.color : 'var(--primary-gradient)';
-    el.reqFileName.textContent = msg.fileName;
-    el.reqFileSize.textContent = formatBytes(msg.fileSize);
-    el.reqFileIcon.innerHTML = getFileIconHTML(msg.fileType);
+    // Check if we should auto-accept this queued file transfer
+    const shouldAutoAccept = (
+        autoAcceptPeerId === senderId &&
+        msg.queueIndex > 0
+    );
     
-    AudioFeedback.playRequest();
-    showModal(el.receiveRequestModal);
+    if (shouldAutoAccept) {
+        // Relayed fallback accept
+        socket.send(JSON.stringify({
+            type: 'relay-file-accept',
+            target: activeTransfer.peerId,
+            accepted: true
+        }));
+        
+        activeTransfer.startTime = Date.now();
+        el.progressTitle.textContent = `Relaying file (${msg.queueIndex + 1}/${msg.queueLength})...`;
+        el.progressFileInfo.textContent = `${activeTransfer.fileName} (${formatBytes(activeTransfer.fileSize)})`;
+        el.transferMode.textContent = 'Server Relay Fallback';
+        el.transferMode.style.background = 'rgba(59, 130, 246, 0.15)';
+        el.transferMode.style.borderColor = 'rgba(59, 130, 246, 0.2)';
+        el.transferMode.style.color = 'var(--secondary-color)';
+        updateProgressUI(0);
+        showModal(el.progressModal);
+        
+        resetAutoAcceptTimeout();
+    } else {
+        // Reset trust session if a new queue/single file is sent manually
+        if (msg.queueIndex === 0 || msg.queueIndex === undefined) {
+            autoAcceptPeerId = null;
+        }
+        
+        // Set interface prompt options
+        el.reqSenderName.textContent = senderName;
+        el.reqSenderAvatar.style.background = peer ? peer.color : 'var(--primary-gradient)';
+        el.reqFileName.textContent = msg.queueLength > 1 
+            ? `${msg.fileName} (and ${msg.queueLength - 1} more files)`
+            : msg.fileName;
+        el.reqFileSize.textContent = formatBytes(msg.fileSize);
+        el.reqFileIcon.innerHTML = getFileIconHTML(msg.fileType);
+        
+        AudioFeedback.playRequest();
+        showModal(el.receiveRequestModal);
+    }
 }
 
 // WS Fallback - Sender gets accept notification
@@ -1372,13 +1446,21 @@ function handleRelayCancel() {
 el.btnAcceptFile.onclick = () => {
     hideModal(el.receiveRequestModal);
     
+    // Set auto-accept peer ID for subsequent files in this queue
+    if (activeTransfer.queueLength > 1) {
+        autoAcceptPeerId = activeTransfer.peerId;
+        resetAutoAcceptTimeout();
+    }
+    
     if (activeTransfer.mode === 'webrtc') {
         const dc = dataChannels.get(activeTransfer.peerId);
         if (dc && dc.readyState === 'open') {
             dc.send(JSON.stringify({ type: 'file-accept', accepted: true }));
             // Set up receiving state UI
             activeTransfer.startTime = Date.now();
-            el.progressTitle.textContent = `Receiving file...`;
+            el.progressTitle.textContent = activeTransfer.queueLength > 1
+                ? `Receiving file (${activeTransfer.queueIndex + 1}/${activeTransfer.queueLength})...`
+                : `Receiving file...`;
             el.progressFileInfo.textContent = `${activeTransfer.fileName} (${formatBytes(activeTransfer.fileSize)})`;
             el.transferMode.textContent = 'WebRTC P2P Direct';
             el.transferMode.style.background = 'rgba(16, 185, 129, 0.15)';
@@ -1399,7 +1481,9 @@ el.btnAcceptFile.onclick = () => {
         }));
         
         activeTransfer.startTime = Date.now();
-        el.progressTitle.textContent = `Relaying file...`;
+        el.progressTitle.textContent = activeTransfer.queueLength > 1
+            ? `Relaying file (${activeTransfer.queueIndex + 1}/${activeTransfer.queueLength})...`
+            : `Relaying file...`;
         el.progressFileInfo.textContent = `${activeTransfer.fileName} (${formatBytes(activeTransfer.fileSize)})`;
         el.transferMode.textContent = 'Server Relay Fallback';
         el.transferMode.style.background = 'rgba(59, 130, 246, 0.15)';
