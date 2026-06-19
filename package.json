@@ -1,0 +1,23 @@
+{
+  "name": "dropit",
+  "version": "1.0.0",
+  "description": "Local network peer-to-peer and relayed file sharing application",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  },
+  "keywords": [
+    "webrtc",
+    "p2p",
+    "file-sharing",
+    "local-network",
+    "airdrop"
+  ],
+  "author": "Antigravity",
+  "license": "MIT"
+}

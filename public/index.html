@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DropIt - Local Network File Sharing</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Client-side QRCode Generator (runs offline) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+    
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Background decorative ambient lights -->
+        <div class="ambient-glow glow-1"></div>
+        <div class="ambient-glow glow-2"></div>
+        
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-parachute-box logo-icon"></i>
+                <h1>Drop<span>It</span></h1>
+            </div>
+            <div class="header-actions" style="display: flex; align-items: center; gap: 0.75rem;">
+                <button class="btn btn-secondary btn-icon" id="btn-show-history" title="Sharing History">
+                    <i class="fa-solid fa-clock-rotate-left"></i>
+                </button>
+                <div class="connection-status" id="ws-status">
+                    <span class="status-dot offline"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <!-- Left Panel / Radar Visualization -->
+            <section class="sharing-section">
+                <div class="radar-container" id="radar-container">
+                    <div class="radar-circle circle-3"></div>
+                    <div class="radar-circle circle-2"></div>
+                    <div class="radar-circle circle-1"></div>
+                    <div class="radar-sweep"></div>
+                    
+                    <!-- Center Beacon representing local device -->
+                    <div class="beacon-center" id="my-avatar-center">
+                        <div class="avatar-ring"></div>
+                        <div class="avatar-core">
+                            <i class="fa-solid fa-laptop" id="my-device-icon"></i>
+                        </div>
+                    </div>
+                    
+                    <!-- Floating Peers go here dynamically -->
+                    <div class="peers-layer" id="peers-layer"></div>
+                </div>
+                
+                <div class="radar-instructions">
+                    <h2 id="radar-title">Looking for nearby devices...</h2>
+                    <p>Open DropIt on another device connected to the same Wi-Fi network or hotspot to start sharing files instantly.</p>
+                </div>
+            </section>
+        </main>
+
+        <!-- Bottom Actions & Config Bar -->
+        <footer class="app-footer">
+            <!-- Current User profile info -->
+            <div class="profile-card" id="profile-card-rename" style="cursor: pointer;" title="Click to rename device">
+                <div class="profile-avatar" id="my-avatar"></div>
+                <div class="profile-details">
+                    <div class="profile-name-container" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span class="profile-name" id="my-name">Generating Name...</span>
+                        <i class="fa-solid fa-pen-to-square edit-name-icon" style="font-size: 0.75rem; opacity: 0.6;" id="btn-edit-name"></i>
+                    </div>
+                    <div class="profile-device" id="my-device-desc">Detecting device...</div>
+                </div>
+            </div>
+
+            <!-- Global Action Triggers -->
+            <div class="action-buttons">
+                <button class="btn btn-secondary" id="btn-text-share" title="Share text or links with a peer">
+                    <i class="fa-solid fa-align-left"></i>
+                    <span>Share Text</span>
+                </button>
+                <button class="btn btn-primary" id="btn-show-qr" title="Show QR Code for network connection">
+                    <i class="fa-solid fa-qrcode"></i>
+                    <span>Connect Device</span>
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- HIDDEN FILE INPUT -->
+    <input type="file" id="file-input" multiple style="display: none;">
+
+    <!-- MODAL 1: Connect Device / QR Code Modal -->
+    <div class="modal-overlay" id="qr-modal">
+        <div class="modal-card">
+            <button class="modal-close" id="btn-close-qr"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-header">
+                <h3>Connect Another Device</h3>
+                <p>Scan the QR code or visit the link from another device on the same local network.</p>
+            </div>
+            <div class="modal-body text-center">
+                <div id="qrcode-container"></div>
+                <div class="link-copier">
+                    <input type="text" id="share-link-input" readonly value="http://localhost:3000">
+                    <button class="btn btn-icon" id="btn-copy-link" title="Copy Link"><i class="fa-regular fa-copy"></i></button>
+                </div>
+                <div class="networks-list">
+                    <h4>Available Local Addresses:</h4>
+                    <ul id="local-networks-ips">
+                        <li>Detecting network addresses...</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 2: Share Clipboard Text Modal -->
+    <div class="modal-overlay" id="text-share-modal">
+        <div class="modal-card">
+            <button class="modal-close" id="btn-close-text-share"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-header">
+                <h3>Share Text Snippet</h3>
+                <p>Send text, notes, or links directly to another peer's clipboard.</p>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="text-to-share">Target Device:</label>
+                    <select id="text-target-peer" class="form-control">
+                        <option value="">Select target device...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="text-to-share">Message or Link:</label>
+                    <textarea id="text-to-share" class="form-control" rows="5" placeholder="Type or paste your content here..."></textarea>
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-text" id="btn-cancel-text">Cancel</button>
+                    <button class="btn btn-primary" id="btn-send-text-confirm" disabled>
+                        <i class="fa-solid fa-paper-plane"></i> Send
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 3: Receive File Request Prompt -->
+    <div class="modal-overlay" id="receive-request-modal">
+        <div class="modal-card">
+            <div class="modal-header text-center">
+                <div class="peer-request-sender">
+                    <div class="sender-avatar" id="req-sender-avatar"></div>
+                    <h3 id="req-sender-name">Sleek Panther</h3>
+                </div>
+                <p>wants to send you a file</p>
+            </div>
+            <div class="modal-body">
+                <div class="file-request-details">
+                    <div class="file-req-icon" id="req-file-icon">
+                        <i class="fa-solid fa-file"></i>
+                    </div>
+                    <div class="file-req-meta">
+                        <div class="file-req-name" id="req-file-name">document.pdf</div>
+                        <div class="file-req-size" id="req-file-size">12.5 MB</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-danger" id="btn-decline-file">Decline</button>
+                <button class="btn btn-success" id="btn-accept-file">Accept</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 4: Text Received Modal -->
+    <div class="modal-overlay" id="text-received-modal">
+        <div class="modal-card">
+            <button class="modal-close" id="btn-close-text-received"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-header">
+                <h3>Text Snippet Received</h3>
+                <p id="text-received-sender">From Sleek Panther</p>
+            </div>
+            <div class="modal-body">
+                <div class="received-text-box">
+                    <pre id="text-received-content"></pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-close-text-received-footer">Dismiss</button>
+                <button class="btn btn-primary" id="btn-copy-received-text">
+                    <i class="fa-regular fa-copy"></i> Copy Text
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 5: File Transfer Progress Modal -->
+    <div class="modal-overlay" id="progress-modal">
+        <div class="modal-card progress-card">
+            <div class="modal-header text-center">
+                <h3 id="progress-title">Transferring File...</h3>
+                <p id="progress-file-info">document.pdf (12.5 MB)</p>
+            </div>
+            <div class="modal-body text-center">
+                <!-- Circular Progress SVG -->
+                <div class="progress-radial-container">
+                    <svg class="progress-ring" width="140" height="140">
+                        <circle class="progress-ring__circle-bg" stroke="rgba(255,255,255,0.05)" stroke-width="8" fill="transparent" r="58" cx="70" cy="70" />
+                        <circle class="progress-ring__circle" id="progress-ring-bar" stroke="var(--primary-color)" stroke-linecap="round" stroke-dasharray="364.4" stroke-dashoffset="364.4" stroke-width="8" fill="transparent" r="58" cx="70" cy="70" />
+                    </svg>
+                    <div class="progress-percentage" id="progress-pct">0%</div>
+                </div>
+
+                <div class="transfer-stats">
+                    <div class="stat-item">
+                        <div class="stat-label">Speed</div>
+                        <div class="stat-val" id="progress-speed">0 MB/s</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Time Remaining</div>
+                        <div class="stat-val" id="progress-time-eta">0s</div>
+                    </div>
+                </div>
+                
+                <div class="transfer-mode-badge" id="transfer-mode">WebRTC Direct</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-danger btn-full" id="btn-cancel-transfer">Cancel Transfer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 6: Media Preview & Actions -->
+    <div class="modal-overlay" id="preview-modal">
+        <div class="modal-card preview-card">
+            <button class="modal-close" id="btn-close-preview"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-header">
+                <h3>File Ready</h3>
+                <p id="preview-file-title">image.jpg (4.2 MB) received successfully</p>
+            </div>
+            <div class="modal-body">
+                <!-- Media Container for rich previewing -->
+                <div class="preview-media-container" id="preview-media-container">
+                    <!-- Dynamic Previewers will append here -->
+                </div>
+            </div>
+            <div class="modal-footer preview-actions">
+                <button class="btn btn-secondary" id="btn-preview-done">Done</button>
+                <a class="btn btn-success" id="btn-download-file" download>
+                    <i class="fa-solid fa-arrow-down"></i> Save File
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 7: Premium File Selector Modal -->
+    <div class="modal-overlay" id="file-select-modal">
+        <div class="modal-card">
+            <button class="modal-close" id="btn-close-file-select"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-header">
+                <h3>Send Files to <span id="file-select-target-name">...</span></h3>
+                <p>Select files, choose categories, or drag and drop files below.</p>
+            </div>
+            <div class="modal-body">
+                <!-- Drag and Drop Zone -->
+                <div class="drop-zone" id="file-drop-zone">
+                    <div class="drop-zone-content">
+                        <i class="fa-solid fa-cloud-arrow-up drop-icon"></i>
+                        <p class="drop-text-primary">Drag & Drop files here</p>
+                        <p class="drop-text-secondary">or click to browse local files</p>
+                    </div>
+                </div>
+
+                <!-- Shortcuts categories -->
+                <div class="file-categories">
+                    <button class="category-btn" id="cat-images" title="Choose Images">
+                        <i class="fa-solid fa-images"></i>
+                        <span>Images</span>
+                    </button>
+                    <button class="category-btn" id="cat-videos" title="Choose Videos">
+                        <i class="fa-solid fa-circle-play"></i>
+                        <span>Videos</span>
+                    </button>
+                    <button class="category-btn" id="cat-audio" title="Choose Audio">
+                        <i class="fa-solid fa-music"></i>
+                        <span>Audio</span>
+                    </button>
+                    <button class="category-btn" id="cat-docs" title="Choose Documents">
+                        <i class="fa-solid fa-file-pdf"></i>
+                        <span>Docs</span>
+                    </button>
+                </div>
+
+                <!-- Selected Queue Preview -->
+                <div class="selected-files-queue" id="selected-files-queue" style="display: none;">
+                    <h4>Files to send:</h4>
+                    <div class="queue-list" id="queue-list">
+                        <!-- Queue items will append here dynamically -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-cancel-file-select">Cancel</button>
+                <button class="btn btn-primary" id="btn-send-files-confirm" disabled>
+                    <i class="fa-solid fa-paper-plane"></i> Send Files
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 8: Rename Device Modal -->
+    <div class="modal-overlay" id="rename-modal">
+        <div class="modal-card">
+            <button class="modal-close" id="btn-close-rename"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-header">
+                <h3>Rename Your Device</h3>
+                <p>Enter a custom name that other devices on your local network will see.</p>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="input-device-name">Display Name:</label>
+                    <input type="text" id="input-device-name" class="form-control" placeholder="Junaid's Laptop" maxlength="25">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-text" id="btn-cancel-rename">Cancel</button>
+                <button class="btn btn-primary" id="btn-save-rename">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 9: Sliding History Panel -->
+    <div class="modal-overlay" id="history-modal">
+        <div class="modal-card history-panel-card">
+            <button class="modal-close" id="btn-close-history"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-header">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding-right: 2rem; margin-bottom: 0.25rem;">
+                    <h3 style="margin-bottom: 0;">Sharing History</h3>
+                    <button class="btn btn-text" id="btn-clear-history" style="font-size: 0.8rem; color: var(--danger-color); padding: 0; display: inline-flex; align-items: center; gap: 0.35rem;">
+                        <i class="fa-solid fa-trash-can"></i> Clear All
+                    </button>
+                </div>
+                <p>History of sent and received transfers during this session.</p>
+            </div>
+            <div class="modal-body" style="padding: 1rem 0;">
+                <div class="history-list" id="history-list-container">
+                    <!-- Dynamic history items -->
+                    <div class="history-empty-state" id="history-empty-state">
+                        <i class="fa-solid fa-clock-rotate-left empty-icon"></i>
+                        <p>No transfers recorded yet</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Global Toast Notification Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Global Notification Chime and Audio contexts are generated programmatically -->
+    <script src="app.js"></script>
+</body>
+</html>
