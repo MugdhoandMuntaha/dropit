@@ -1529,14 +1529,48 @@ function concludeTransferSuccess(receivedBlob = null) {
     AudioFeedback.playSuccess();
     
     if (activeTransfer.type === 'receive' && receivedBlob) {
-        setupFilePreview(receivedBlob, activeTransfer.fileName, activeTransfer.fileSize, activeTransfer.fileType);
-        addHistoryRecord('received', activeTransfer.fileName, activeTransfer.fileSize, activeTransfer.fileType, 'Completed', receivedBlob);
+        const name = activeTransfer.fileName;
+        const size = activeTransfer.fileSize;
+        const type = activeTransfer.fileType;
+        const pId = activeTransfer.peerId;
+        const qIndex = activeTransfer.queueIndex;
+        const qLength = activeTransfer.queueLength;
+        
+        // Auto-download the file (AirDrop style)
+        const fileUrl = URL.createObjectURL(receivedBlob);
+        const link = document.createElement('a');
+        link.href = fileUrl;
+        link.download = name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        addHistoryRecord('received', name, size, type, 'Completed', receivedBlob);
+        
+        // Close connection and clean up state immediately so the next connection is clean
+        closePeerConnection(pId);
+        resetActiveTransfer();
+        
+        if (qLength > 1) {
+            showToast("File Received", `${name} saved successfully (${qIndex + 1}/${qLength})`, 'success');
+            
+            // If it's the last file in the queue, clear auto-accept session trust and show preview
+            if (qIndex === qLength - 1) {
+                autoAcceptPeerId = null;
+                setTimeout(() => {
+                    setupFilePreview(receivedBlob, name, size, type);
+                }, 800);
+            }
+        } else {
+            // Single file transfer
+            setupFilePreview(receivedBlob, name, size, type);
+        }
     } else {
         addHistoryRecord('sent', activeTransfer.fileName, activeTransfer.fileSize, activeTransfer.fileType, 'Completed');
         if (sendingQueue && sendingQueue.length > 0) {
             setTimeout(sendNextFileInQueue, 600);
         } else {
-            alert('All files sent successfully!');
+            showToast("All Files Sent", "All files sent successfully!", "success");
             closePeerConnection(activeTransfer.peerId);
             resetActiveTransfer();
         }
@@ -1610,8 +1644,6 @@ function setupFilePreview(blob, name, size, type) {
     el.btnPreviewDone.onclick = el.btnClosePreview.onclick = () => {
         hideModal(el.previewModal);
         URL.revokeObjectURL(fileUrl);
-        closePeerConnection(activeTransfer.peerId);
-        resetActiveTransfer();
     };
     
     showModal(el.previewModal);
